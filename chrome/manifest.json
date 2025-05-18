@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Job Detector for ResumeGen",
+  "version": "1.0.0",
+  "description": "Auto-detects job descriptions and sends them to ResumeGen",
+  "permissions": ["activeTab", "scripting", "tabs"],
+  "action": {
+    "default_popup": "index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["index.css", "assets/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
