@@ -10,12 +10,14 @@ export default defineConfig({
     sourcemap: process.env.NODE_ENV !== 'production',
     rollupOptions: {
       input: {
-        popup: resolve(__dirname, 'index.html')
-        // Remove the background entry since you don't have this file
-        // add Later!!
+        popup: resolve(__dirname, 'index.html'),
+        background: resolve(__dirname, 'chrome/background.js') // Add background script
       },
       output: {
-        entryFileNames: 'assets/[name].js',
+        // Output background.js directly to dist, not dist/assets
+        entryFileNames: (chunkInfo) => {
+          return chunkInfo.name === 'background' ? '[name].js' : 'assets/[name].js';
+        },
         chunkFileNames: 'assets/[name].js',
         assetFileNames: 'assets/[name].[ext]'
       }
