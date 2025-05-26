@@ -1,7 +1,5 @@
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { extractJobDescription } from './content-script/extractors';
-
 // This will be imported once we create the component
 import JobDetectorPanel from './components/JobDetectorPanel';
 
@@ -16,52 +14,12 @@ import JobDetectorPanel from './components/JobDetectorPanel';
   let root: Root | null = null;
   let shadowHost: HTMLDivElement | null = null;
   let detectionTimeout: NodeJS.Timeout | null = null;
-  let currentJobId: string | null = null;
-
-  // Cleanup function to prevent multiple instances
-  function cleanup() {
-    if (detectionTimeout) {
-      clearTimeout(detectionTimeout);
-      detectionTimeout = null;
-    }
-    unmountComponent();
-    currentJobId = null;
-  }
-
-  // Listen for page navigation events
-  let lastUrl = window.location.href;
-  new MutationObserver(() => {
-    const currentUrl = window.location.href;
-    if (currentUrl !== lastUrl) {
-      console.log('Job Detector: Page navigation detected, cleaning up previous instance');
-      cleanup();
-      lastUrl = currentUrl;
-      // Re-initialize after navigation
-      setTimeout(initializeJobDetector, 500);
-    }
-  }).observe(document, { subtree: true, childList: true });
-
-  // Also listen for popstate events (back/forward navigation)
-  window.addEventListener('popstate', () => {
-    console.log('Job Detector: Popstate event detected, cleaning up');
-    cleanup();
-    setTimeout(initializeJobDetector, 500);
-  });
 
   function mountComponent(initialJobDescription: string) {
     if (document.getElementById(MOUNT_POINT_ID)) {
       // Already mounted
-      console.log('Job Detector: Component already mounted, skipping');
       return;
     }
-
-    // Store current job ID to prevent remounting for same job
-    const jobId = getJobId();
-    if (currentJobId === jobId && jobId) {
-      console.log('Job Detector: Already processed this job ID:', jobId);
-      return;
-    }
-    currentJobId = jobId;
 
     shadowHost = document.createElement('div');
     shadowHost.id = MOUNT_POINT_ID;
@@ -324,13 +282,12 @@ import JobDetectorPanel from './components/JobDetectorPanel';
       shadowHost.parentNode.removeChild(shadowHost);
       shadowHost = null;
     }
-    // Reset current job ID when unmounting
-    currentJobId = null;
   }
 
   // Temporary test function to use until we implement proper extractors
   function detectAndInject(extractedDescription?: string | null) {
-    const jobDescriptionToMount = extractedDescription || `Frontend Developer
+    const jobDescription = extractJobDescription();
+    const jobDescriptionToMount = jobDescription || extractedDescription || `Frontend Developer
   
 Location: Remote
 Salary: $120K - $150K
@@ -341,9 +298,9 @@ The ideal candidate will have 3+ years of experience working with:
 - Modern CSS frameworks
 - State management solutions
 
-This is a full-time remote position with competitive benefits.`; // Or a more generic placeholder
+This is a full-time remote position with competitive benefits.`; // Fallback text
 
-    console.log("Job Detector: Mounting with description:", jobDescriptionToMount);
+    console.log("Job Detector: Mounting with description:", jobDescriptionToMount.substring(0, 200) + '...');
     mountComponent(jobDescriptionToMount);
     return true;
   }
@@ -386,6 +343,54 @@ This is a full-time remote position with competitive benefits.`; // Or a more ge
 
   console.log('Job Detector content script loaded and ready.');
 
+  // Simple job description extractor
+  function extractJobDescription(): string {
+    try {
+      const url = window.location.href;
+
+      // Check for Workday
+      if (url.includes('wd5.myworkdayjobs.com')) {
+        const workdayElement = document.querySelector('[data-automation-id="jobPostingDescription"]');
+        if (workdayElement) {
+          console.log('Job Detector: Found Workday job description');
+          return workdayElement.textContent || '';
+        }
+      }
+
+      // Check for Greenhouse
+      if (url.includes('job-boards.greenhouse.io')) {
+        const greenhouseElement = document.querySelector('.job__description.body');
+        if (greenhouseElement) {
+          console.log('Job Detector: Found Greenhouse job description');
+          return greenhouseElement.textContent || '';
+        }
+      }
+
+      // Generic fallback - try common selectors
+      const genericSelectors = [
+        '.job-description',
+        '.description',
+        '[class*="description"]',
+        '.job-details',
+        '.job-content'
+      ];
+
+      for (const selector of genericSelectors) {
+        const element = document.querySelector(selector);
+        if (element && element.textContent && element.textContent.length > 100) {
+          console.log(`Job Detector: Found generic job description using selector: ${selector}`);
+          return element.textContent;
+        }
+      }
+
+      console.log('Job Detector: No job description found');
+      return '';
+    } catch (error) {
+      console.error('Job Detector: Error extracting job description:', error);
+      return '';
+    }
+  }
+
   // New URL pattern detection logic
   function isJobPage() {
     const url = window.location.href;
@@ -402,9 +407,10 @@ This is a full-time remote position with competitive benefits.`; // Or a more ge
       /\/jobTasks\//i,           // Workday specific
       /\/application$/i,         // Ends with /application
       /applythankyou/i,          // Qualtrics
-      /\/questions(?:[\/\?]|$)/i,  // FIXED: /questions/, /questions?, or ending with /questions
-      /\/apply(?:[\/\?]|$)/i,      // FIXED: /apply/, /apply?, or ending with /apply
-      /\/submit(?:[\/\?]|$)/i      // FIXED: /submit/, /submit?, or ending with /submit
+      /\/questions[\/\?]/i,      // NEW: /questions/ or /questions?
+      /\/apply[\/\?]/i,          // NEW: /apply/ or /apply?  
+      /\/submit[\/\?]/i          // NEW: /submit/ or /submit?
+
     ];
 
     // If URL matches any exclude pattern, return false immediately
@@ -492,47 +498,29 @@ This is a full-time remote position with competitive benefits.`; // Or a more ge
   function getJobId(): string | null {
     const url = window.location.href;
 
-    // Extract job identifier patterns - ordered by specificity
+    // Extract job identifier patterns
     const jobPatterns = [
-      // Microsoft Careers - extract numeric job ID from URL like /jobs/1823971/Software-Engineer
-      /\/jobs\/(\d+)\/[^\/\?]*/i,          // /jobs/1823971/Software-Engineer
-      // LinkedIn - extract numeric job ID  
-      /\/jobs\/view\/(\d+)/i,              // /jobs/view/3445623894
-      // Indeed - extract job key
-      /[?&]jk=([a-zA-Z0-9]+)/i,           // ?jk=abc123def456
-      // Workday - extract job ID from various formats
-      /jobId=([^&]+)/i,                    // ?jobId=6889008
-      // Generic patterns
-      /\/job[s]?\/(\d+)/i,                 // /jobs/12345  
-      /\/position[s]?\/(\d+)/i,            // /position/12345
-      /\/career[s]?\/(\d+)/i,              // /careers/12345
-      // Glassdoor
-      /\/jobs\/.*?jobListingId=(\d+)/i,    // jobListingId=12345
-      // AngelList/Wellfound
-      /\/jobs\/(\d+)-/i,                   // /jobs/12345-software-engineer
-      /\/job\/.*?\/([A-Z0-9_-]{6,})/i,     // /job/.../R34288 or /job/.../JR12345
-      // Fallback for any numeric ID in job URLs
-      /\/(?:job|position|career|opening)s?[\/\-](\d{4,})/i  // At least 4 digits
+      /\/job\/.*?\/([^\/\?]+)/i,           // /job/.../R34288
+      /\/jobs\/(\d+)/i,                    // /jobs/12345  
+      /\/position\/(\d+)/i,                // /position/12345
+      /jobId=([^&]+)/i                     // ?jobId=6889008
     ];
 
     for (let pattern of jobPatterns) {
       const match = url.match(pattern);
       if (match && match[1]) {
-        const jobId = `${window.location.hostname}-${match[1]}`;
-        console.log(`Job Detector: Extracted job ID "${match[1]}" using pattern: ${pattern}`);
-        return jobId;
+        return `${window.location.hostname}-${match[1]}`;
       }
     }
 
-    console.log("Job Detector: No job ID pattern matched for URL:", url);
     return null;
   }
 
- 
 
 
   // Main detection logic
   function initializeJobDetector() {
+
     // Clear any existing timeout to prevent multiple detections
     if (detectionTimeout) {
       clearTimeout(detectionTimeout);
@@ -558,11 +546,6 @@ This is a full-time remote position with competitive benefits.`; // Or a more ge
         return;
       }
 
-      // Check if this is the same job we're already showing
-      if (currentJobId === jobId) {
-        console.log(`Job Detector: Already showing popup for this job ID (${jobId}).`);
-        return;
-      }
 
       const extractedJobDescription = extractJobDescription(); // Call the extractor
       detectAndInject(extractedJobDescription); // Pass the extracted description
@@ -572,7 +555,6 @@ This is a full-time remote position with competitive benefits.`; // Or a more ge
   // Run the detector when the content script loads
   initializeJobDetector();
 
-  // Clean up when page unloads
-  window.addEventListener('beforeunload', cleanup);
+
 
 })();
