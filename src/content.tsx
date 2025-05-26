@@ -1,7 +1,6 @@
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-// We'll comment out this import until we create the extractors
-// import { extractJobDescription } from './content-script/extractors';
+import { extractJobDescription } from './content-script/extractors';
 
 // This will be imported once we create the component
 import JobDetectorPanel from './components/JobDetectorPanel';
@@ -11,14 +10,58 @@ import JobDetectorPanel from './components/JobDetectorPanel';
 (function () {
   const MOUNT_POINT_ID = 'job-detector-mount-point';
 
+  // CLEAR SESSION DATA ON EVERY PAGE LOAD
+  sessionStorage.removeItem('jobDetectorShown');
+
   let root: Root | null = null;
   let shadowHost: HTMLDivElement | null = null;
+  let detectionTimeout: NodeJS.Timeout | null = null;
+  let currentJobId: string | null = null;
+
+  // Cleanup function to prevent multiple instances
+  function cleanup() {
+    if (detectionTimeout) {
+      clearTimeout(detectionTimeout);
+      detectionTimeout = null;
+    }
+    unmountComponent();
+    currentJobId = null;
+  }
+
+  // Listen for page navigation events
+  let lastUrl = window.location.href;
+  new MutationObserver(() => {
+    const currentUrl = window.location.href;
+    if (currentUrl !== lastUrl) {
+      console.log('Job Detector: Page navigation detected, cleaning up previous instance');
+      cleanup();
+      lastUrl = currentUrl;
+      // Re-initialize after navigation
+      setTimeout(initializeJobDetector, 500);
+    }
+  }).observe(document, { subtree: true, childList: true });
+
+  // Also listen for popstate events (back/forward navigation)
+  window.addEventListener('popstate', () => {
+    console.log('Job Detector: Popstate event detected, cleaning up');
+    cleanup();
+    setTimeout(initializeJobDetector, 500);
+  });
 
   function mountComponent(initialJobDescription: string) {
     if (document.getElementById(MOUNT_POINT_ID)) {
       // Already mounted
+      console.log('Job Detector: Component already mounted, skipping');
       return;
     }
+
+    // Store current job ID to prevent remounting for same job
+    const jobId = getJobId();
+    if (currentJobId === jobId && jobId) {
+      console.log('Job Detector: Already processed this job ID:', jobId);
+      return;
+    }
+    currentJobId = jobId;
 
     shadowHost = document.createElement('div');
     shadowHost.id = MOUNT_POINT_ID;
@@ -281,12 +324,13 @@ import JobDetectorPanel from './components/JobDetectorPanel';
       shadowHost.parentNode.removeChild(shadowHost);
       shadowHost = null;
     }
+    // Reset current job ID when unmounting
+    currentJobId = null;
   }
 
   // Temporary test function to use until we implement proper extractors
-  function detectAndInject() {
-    // For testing purposes, we'll use a sample job description
-    const testJobDescription = `Frontend Developer
+  function detectAndInject(extractedDescription?: string | null) {
+    const jobDescriptionToMount = extractedDescription || `Frontend Developer
   
 Location: Remote
 Salary: $120K - $150K
@@ -297,10 +341,10 @@ The ideal candidate will have 3+ years of experience working with:
 - Modern CSS frameworks
 - State management solutions
 
-This is a full-time remote position with competitive benefits.`;
+This is a full-time remote position with competitive benefits.`; // Or a more generic placeholder
 
-    console.log("Job Detector: Testing with sample job description");
-    mountComponent(testJobDescription);
+    console.log("Job Detector: Mounting with description:", jobDescriptionToMount);
+    mountComponent(jobDescriptionToMount);
     return true;
   }
 
@@ -342,9 +386,193 @@ This is a full-time remote position with competitive benefits.`;
 
   console.log('Job Detector content script loaded and ready.');
 
-  // For testing, automatically inject after a short delay
-  setTimeout(() => {
-    detectAndInject();
-  }, 1500);
+  // New URL pattern detection logic
+  function isJobPage() {
+    const url = window.location.href;
+
+    // Enhanced exclusion patterns to catch completion/confirmation pages
+    const excludePatterns = [
+      /\/browse[\/\?]/i,
+      /\/search[\/\?]/i,
+      /thank[\s-]?you/i,
+      /success/i,
+      /confirmation/i,
+      /submitted/i,
+      /completed/i,
+      /\/jobTasks\//i,           // Workday specific
+      /\/application$/i,         // Ends with /application
+      /applythankyou/i,          // Qualtrics
+      /\/questions(?:[\/\?]|$)/i,  // FIXED: /questions/, /questions?, or ending with /questions
+      /\/apply(?:[\/\?]|$)/i,      // FIXED: /apply/, /apply?, or ending with /apply
+      /\/submit(?:[\/\?]|$)/i      // FIXED: /submit/, /submit?, or ending with /submit
+    ];
+
+    // If URL matches any exclude pattern, return false immediately
+    if (excludePatterns.some(pattern => pattern.test(url))) {
+      console.log("Excluded URL pattern detected");
+      return false;
+    }
+
+    // Enhanced job URL patterns with more specific matching
+    const jobUrlPatterns = [
+      // Only match job listing patterns, not application submission pages
+      /\/job[s]?\/(?!.*thank|.*complete)/i,
+      /\/career[s]?\/(?!.*task|.*complete)/i,
+      /\/position[s]?\/(?!.*thank|.*complete)/i,
+      /\/vacancy(?!.*complete)/i,
+      /\/vacancies\/(?!.*complete)/i,
+      /\/opening[s]?\/(?!.*complete)/i,
+      /\/job-description/i,
+      /\/job-details/i,
+      /\/job-posting/i
+    ];
+
+
+    return jobUrlPatterns.some(pattern => pattern.test(url));
+  }
+
+  /*
+  function hasJobContent() {
+
+    // Add null safety check
+    const bodyText = document.body?.textContent;
+    if (!bodyText) {
+      console.log("No body text content available");
+      return false;
+    }
+
+    const pageText = bodyText.toLowerCase();
+    // Check for application completion indicators first
+    const completionIndicators = [
+      'application submitted',
+      'thank you for applying',
+      'application received',
+      'successfully applied',
+      'application complete',
+      'completed application',
+      'job application completed',
+      'thank you for your interest',
+      'application has been submitted',
+      'we have received your application'
+    ];
+
+    if (completionIndicators.some(indicator => pageText.includes(indicator))) {
+      console.log("Application completion content detected");
+      return false;
+    }
+
+    // Check for specific Workday application completion elements
+    if (document.querySelector('.completed-task') ||
+      document.querySelector('[data-automation-id="completedTaskList"]')) {
+      console.log("Workday application completion page detected");
+      return false;
+    }
+
+    // Enhanced job content detection
+    const jobIndicators = [
+      'responsibilities',
+      'requirements',
+      'qualifications',
+      'skills required',
+      'job description',
+      'about this job',
+      'position overview',
+      'job summary',
+      'what you\\'ll do'
+    ];
+
+    // Require multiple job indicators for more confidence
+    const matchedIndicators = jobIndicators.filter(marker => pageText.includes(marker));
+
+    return matchedIndicators.length >= 2 && pageText.length > 1000;
+  }
+  */
+
+  // Create unique job identifier from URL
+  function getJobId(): string | null {
+    const url = window.location.href;
+
+    // Extract job identifier patterns - ordered by specificity
+    const jobPatterns = [
+      // Microsoft Careers - extract numeric job ID from URL like /jobs/1823971/Software-Engineer
+      /\/jobs\/(\d+)\/[^\/\?]*/i,          // /jobs/1823971/Software-Engineer
+      // LinkedIn - extract numeric job ID  
+      /\/jobs\/view\/(\d+)/i,              // /jobs/view/3445623894
+      // Indeed - extract job key
+      /[?&]jk=([a-zA-Z0-9]+)/i,           // ?jk=abc123def456
+      // Workday - extract job ID from various formats
+      /jobId=([^&]+)/i,                    // ?jobId=6889008
+      // Generic patterns
+      /\/job[s]?\/(\d+)/i,                 // /jobs/12345  
+      /\/position[s]?\/(\d+)/i,            // /position/12345
+      /\/career[s]?\/(\d+)/i,              // /careers/12345
+      // Glassdoor
+      /\/jobs\/.*?jobListingId=(\d+)/i,    // jobListingId=12345
+      // AngelList/Wellfound
+      /\/jobs\/(\d+)-/i,                   // /jobs/12345-software-engineer
+      /\/job\/.*?\/([A-Z0-9_-]{6,})/i,     // /job/.../R34288 or /job/.../JR12345
+      // Fallback for any numeric ID in job URLs
+      /\/(?:job|position|career|opening)s?[\/\-](\d{4,})/i  // At least 4 digits
+    ];
+
+    for (let pattern of jobPatterns) {
+      const match = url.match(pattern);
+      if (match && match[1]) {
+        const jobId = `${window.location.hostname}-${match[1]}`;
+        console.log(`Job Detector: Extracted job ID "${match[1]}" using pattern: ${pattern}`);
+        return jobId;
+      }
+    }
+
+    console.log("Job Detector: No job ID pattern matched for URL:", url);
+    return null;
+  }
+
+ 
+
+
+  // Main detection logic
+  function initializeJobDetector() {
+    // Clear any existing timeout to prevent multiple detections
+    if (detectionTimeout) {
+      clearTimeout(detectionTimeout);
+    }
+
+    const delay = 1500; // Keep the 1500ms timeout
+
+    detectionTimeout = setTimeout(() => {
+      console.log("Job Detector Debug:");
+      console.log("- URL:", window.location.href);
+      console.log("- URL Check (isJobPage):", isJobPage());
+
+      if (!isJobPage()) {
+        console.log("Job Detector: Not a job page URL based on isJobPage().");
+        return;
+      }
+
+      const jobId = getJobId();
+      console.log("- Extracted Job ID:", jobId);
+
+      if (!jobId) {
+        console.log("Job Detector: Could not identify a unique job ID from the URL.");
+        return;
+      }
+
+      // Check if this is the same job we're already showing
+      if (currentJobId === jobId) {
+        console.log(`Job Detector: Already showing popup for this job ID (${jobId}).`);
+        return;
+      }
+
+      const extractedJobDescription = extractJobDescription(); // Call the extractor
+      detectAndInject(extractedJobDescription); // Pass the extracted description
+    }, delay);
+  }
+
+  // Run the detector when the content script loads
+  initializeJobDetector();
+
+  // Clean up when page unloads
+  window.addEventListener('beforeunload', cleanup);
 
 })();
