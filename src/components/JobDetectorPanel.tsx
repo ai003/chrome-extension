@@ -4,41 +4,66 @@ interface JobDetectorPanelProps {
   initialJobDescription?: string;
   onClose: () => void;
   onContinue: (jobDescription: string) => void;
-  isLoading?: boolean;
+  isScanning?: boolean;   // NEW: Phase 1 - Shows spinner without streaming
+  isStreaming?: boolean;  // NEW: Phase 2 - Shows streaming animation
 }
 
 const JobDetectorPanel: React.FC<JobDetectorPanelProps> = ({
   initialJobDescription = "",
   onClose,
   onContinue,
-  isLoading = false
+  isScanning = false,
+  isStreaming = false
 }) => {
   const [jobDescription, setJobDescription] = useState(initialJobDescription);
   const [visibleText, setVisibleText] = useState("");
   const [loadingProgress, setLoadingProgress] = useState(0);
+  const [internalLoading, setInternalLoading] = useState(false);
 
   // Typing animation effect - keep this functionality
   useEffect(() => {
-    if (isLoading && initialJobDescription) {
+    if (isStreaming && initialJobDescription) {
+      setInternalLoading(true);
+      setVisibleText("");
+      setLoadingProgress(0);
+
+      const startTime = Date.now();
+      let completed = false;
+
       const interval = setInterval(() => {
-        if (loadingProgress < initialJobDescription.length) {
-          const newProgress = Math.min(
-            loadingProgress + Math.floor(Math.random() * 5) + 1,
-            initialJobDescription.length
-          );
-          setLoadingProgress(newProgress);
-          setVisibleText(initialJobDescription.substring(0, newProgress));
+        const elapsedTime = Date.now() - startTime;
+        const timeProgress = Math.min(elapsedTime / 4000, 1);
+
+        // Calculate character position based on time progress
+        const characterPosition = Math.floor(timeProgress * initialJobDescription.length);
+
+        if (timeProgress < 1) {
+          setVisibleText(initialJobDescription.substring(0, characterPosition));
+          setLoadingProgress(timeProgress * 100);
         } else {
-          clearInterval(interval);
-          setJobDescription(initialJobDescription);
+          if (!completed) {
+            completed = true;
+            clearInterval(interval);
+
+            // Set final state
+            setVisibleText(initialJobDescription);
+            setLoadingProgress(100);
+
+            setTimeout(() => {
+              setJobDescription(initialJobDescription);
+              setInternalLoading(false);
+            }, 100);
+          }
         }
-      }, 50);
+      }, 16);
 
       return () => clearInterval(interval);
     } else {
+      //fallback option if nothing is working
       setJobDescription(initialJobDescription);
+      setInternalLoading(false);
     }
-  }, [isLoading, loadingProgress, initialJobDescription]);
+  }, [isStreaming, initialJobDescription]);
 
   return (
     <div className="panel-container">
@@ -64,21 +89,24 @@ const JobDetectorPanel: React.FC<JobDetectorPanelProps> = ({
       <div className="job-content">
         <label className="description-label">Edit Job Description</label>
         <div className="separator"></div>
+        {/* Verify that it can work without isLoading*/}
         <textarea
           placeholder="Job description will appear here. You can edit if needed."
-          value={isLoading ? visibleText : jobDescription}
+          value={isStreaming ? visibleText : jobDescription}
           onChange={(e) => setJobDescription(e.target.value)}
-          readOnly={isLoading}
+          readOnly={isStreaming}
         />
 
         {/* Loading Overlay */}
-        {isLoading && (
+        {(isScanning || (isStreaming && internalLoading)) && (
           <div className="loading-overlay">
             <div className="loading-spinner animate-spin"></div>
-            <p className="loading-text">Scanning job description...</p>
-            {initialJobDescription && (
+            <p className="loading-text">
+              {isScanning ? "Scanning job description..." : "Processing..."}
+            </p>
+            {isStreaming && initialJobDescription && (
               <p className="loading-progress">
-                {Math.round((loadingProgress / initialJobDescription.length) * 100)}% complete
+                {Math.round(loadingProgress)}% complete
               </p>
             )}
           </div>
@@ -88,8 +116,8 @@ const JobDetectorPanel: React.FC<JobDetectorPanelProps> = ({
       {/* Footer */}
       <div className="footer">
         <button
-          className={`continue-button ${(isLoading || !jobDescription.trim()) ? 'disabled' : ''}`}
-          disabled={isLoading || !jobDescription.trim()}
+          disabled={isScanning || isStreaming || !jobDescription.trim()}
+          className={`continue-button ${(isScanning || isStreaming || !jobDescription.trim()) ? 'disabled' : ''}`}
           onClick={() => onContinue(jobDescription)}
         >
           Continue to ResumeGen

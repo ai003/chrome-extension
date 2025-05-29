@@ -15,7 +15,10 @@ import JobDetectorPanel from './components/JobDetectorPanel';
   let shadowHost: HTMLDivElement | null = null;
   let detectionTimeout: NodeJS.Timeout | null = null;
 
-  function mountComponent(initialJobDescription: string) {
+  function mountComponent(initialJobDescription: string,
+    isStreaming: boolean = false,
+    isScanning: boolean = false
+  ) {
     if (document.getElementById(MOUNT_POINT_ID)) {
       // Already mounted
       return;
@@ -251,7 +254,8 @@ import JobDetectorPanel from './components/JobDetectorPanel';
       <React.StrictMode>
         <JobDetectorPanel
           initialJobDescription={initialJobDescription}
-          isLoading={false}
+          isScanning={isScanning}     // NEW
+          isStreaming={isStreaming}   // NEW
           onClose={() => {
             unmountComponent();
           }}
@@ -284,10 +288,81 @@ import JobDetectorPanel from './components/JobDetectorPanel';
     }
   }
 
+  // Simple retry function for content extraction
+  function tryExtractWithRetry(maxAttempts = 3) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const content = extractJobDescription();
+      if (content) {
+        console.log(`Job Detector: Content extracted on attempt ${attempt + 1}`);
+        return content;
+      }
+      // For synchronous retry, we'll just try multiple times immediately
+      // since extraction is typically synchronous DOM querying
+    }
+    console.log('Job Detector: All extraction attempts failed');
+    return '';
+  }
+
   // Temporary test function to use until we implement proper extractors
-  function detectAndInject(extractedDescription?: string | null) {
-    const jobDescription = extractJobDescription();
-    const jobDescriptionToMount = jobDescription || extractedDescription || `Frontend Developer
+  //   function detectAndInject(extractedDescription?: string | null) {
+  //     let jobContent = extractedDescription;
+
+  //     if (!jobContent) {
+  //       console.log('Job Detector: No job description found, trying to extract...');
+  //       jobContent = tryExtractWithRetry(); // Try to extract content
+  //     }
+
+  //     const jobDescriptionToMount = jobContent || `Frontend Developer
+
+  // Location: Remote
+  // Salary: $120K - $150K
+
+  // We are seeking a frontend developer with React experience to join our team.
+  // The ideal candidate will have 3+ years of experience working with:
+  // - React and TypeScript
+  // - Modern CSS frameworks
+  // - State management solutions
+
+  // This is a full-time remote position with competitive benefits.`; // Fallback text
+
+  //     // Simple rule: animate only if we extracted real content
+  //     const hasRealContent = !!(jobContent && jobContent.trim().length > 50);
+
+  //     console.log("Job Detector: Mounting with description:", jobDescriptionToMount.substring(0, 200) + '...');
+  //     mountComponent(jobDescriptionToMount.trim(), hasRealContent);
+  //     return true;
+  //   }
+
+  function updateComponent(newDescription: string, isStreaming: boolean, isScanning: boolean) {
+    if (root) {
+      root.render(
+        <React.StrictMode>
+          <JobDetectorPanel
+            initialJobDescription={newDescription}
+            isScanning={isScanning}
+            isStreaming={isStreaming}
+            onClose={() => unmountComponent()}
+            onContinue={(jobDescription: string) => {
+              console.log('Job Detector: Continue with job description:', jobDescription);
+              unmountComponent();
+            }}
+          />
+        </React.StrictMode>
+      );
+    }
+  }
+
+  function extractAndUpdate() {
+    const extractedContent = extractJobDescription(); // Single attempt
+
+    let finalContent = extractedContent;
+
+    if (!finalContent) {
+      console.log('Job Detector: First extraction failed, trying retry...');
+      finalContent = tryExtractWithRetry();
+    }
+
+    const jobDescriptionToMount = finalContent || `Frontend Developer
   
 Location: Remote
 Salary: $120K - $150K
@@ -298,11 +373,18 @@ The ideal candidate will have 3+ years of experience working with:
 - Modern CSS frameworks
 - State management solutions
 
-This is a full-time remote position with competitive benefits.`; // Fallback text
+This is a full-time remote position with competitive benefits.`;
 
-    console.log("Job Detector: Mounting with description:", jobDescriptionToMount.substring(0, 200) + '...');
-    mountComponent(jobDescriptionToMount);
-    return true;
+    const hasRealContent = !!(finalContent && finalContent.trim().length > 50);
+
+    console.log("Job Detector: Switching to final state with content:", jobDescriptionToMount.substring(0, 200) + '...');
+
+    // Switch states based on content found
+    if (hasRealContent) {
+      updateComponent(jobDescriptionToMount.trim(), true, false); // Start streaming
+    } else {
+      updateComponent(jobDescriptionToMount.trim(), false, false); // Show instantly
+    }
   }
 
   // Chrome extension message handler
@@ -314,13 +396,13 @@ This is a full-time remote position with competitive benefits.`; // Fallback tex
         ? request.jobDescription
         : "No specific job description provided by message.";
 
-      mountComponent(jobDesc);
+      mountComponent(jobDesc, false, false);
       sendResponse({ status: "Panel injection initiated", jobDescription: jobDesc });
       return true;
     }
 
     if (request.action === "manualActivation") {
-      mountComponent("");
+      mountComponent("", false, false); // No animation for manual activation with empty content
       sendResponse({ status: "Manual panel activation initiated" });
       return true;
     }
@@ -349,7 +431,7 @@ This is a full-time remote position with competitive benefits.`; // Fallback tex
       const url = window.location.href;
 
       // Check for Workday
-      if (url.includes('wd5.myworkdayjobs.com')) {
+      if (url.includes('.myworkdayjobs.com')) {
         const workdayElement = document.querySelector('[data-automation-id="jobPostingDescription"]');
         if (workdayElement) {
           console.log('Job Detector: Found Workday job description');
@@ -526,30 +608,37 @@ This is a full-time remote position with competitive benefits.`; // Fallback tex
       clearTimeout(detectionTimeout);
     }
 
-    const delay = 1500; // Keep the 1500ms timeout
+    console.log("Job Detector Debug:");
+    console.log("- URL:", window.location.href);
+    console.log("- URL Check (isJobPage):", isJobPage());
+
+    if (!isJobPage()) {
+      console.log("Job Detector: Not a job page URL based on isJobPage().");
+      return;
+    }
+
+    const jobId = getJobId();
+    console.log("- Extracted Job ID:", jobId);
+
+    if (!jobId) {
+      console.log("Job Detector: Could not identify a unique job ID from the URL.");
+      return;
+    }
+
+    // PHASE 1: Mount with scanning state immediately
+    console.log("Job Detector: Mounting component with scanning state...");
+    mountComponent("", false, true); // (content, isStreaming, isScanning)
+
+    const delay = 2000; // delay before extraction called to let page wait
 
     detectionTimeout = setTimeout(() => {
-      console.log("Job Detector Debug:");
-      console.log("- URL:", window.location.href);
-      console.log("- URL Check (isJobPage):", isJobPage());
-
-      if (!isJobPage()) {
-        console.log("Job Detector: Not a job page URL based on isJobPage().");
-        return;
-      }
-
-      const jobId = getJobId();
-      console.log("- Extracted Job ID:", jobId);
-
-      if (!jobId) {
-        console.log("Job Detector: Could not identify a unique job ID from the URL.");
-        return;
-      }
 
 
-      const extractedJobDescription = extractJobDescription(); // Call the extractor
-      detectAndInject(extractedJobDescription); // Pass the extracted description
+      // PHASE 2: Extract and switch to appropriate state
+      extractAndUpdate();
     }, delay);
+
+    //previously called detect and inject
   }
 
   // Run the detector when the content script loads
