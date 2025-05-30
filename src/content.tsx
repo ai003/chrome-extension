@@ -260,14 +260,7 @@ import JobDetectorPanel from './components/JobDetectorPanel';
             unmountComponent();
           }}
           onContinue={(jobDescription: string) => {
-
-            console.log('Job Detector: Continue with job description:', jobDescription);
-
-            // Just log the data for now - we'll implement the site redirection later
-            console.log('Job description to send:', jobDescription);
-
-            // Later we'll add: window.open(yourActualSite, '_blank');
-
+            console.log('Job Detector: Initial mount with job description:', jobDescription);
             unmountComponent();
           }}
         />
@@ -342,9 +335,42 @@ import JobDetectorPanel from './components/JobDetectorPanel';
             isScanning={isScanning}
             isStreaming={isStreaming}
             onClose={() => unmountComponent()}
-            onContinue={(jobDescription: string) => {
-              console.log('Job Detector: Continue with job description:', jobDescription);
-              unmountComponent();
+            onStreamingComplete={() => {
+              // NEW: This gets called when streaming animation finishes
+              updateComponent(newDescription, false, false); // Clear isStreaming
+            }}
+            onContinue={async (jobDescription: string) => {
+              try {
+                const response = await fetch('https://us-central1-resumegen-d74ba.cloudfunctions.net/storeJob', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    jobDescription,
+                    jobUrl: window.location.href
+                  })
+                });
+
+                console.log('storeJob response status:', response.status); // DEBUG
+
+                const responseData = await response.json();
+                console.log('storeJob response data:', responseData); // DEBUG
+
+                if (!response.ok) {
+                  console.error('storeJob failed:', responseData);
+                  return; // Don't open window if storage failed
+                }
+
+
+                const { jobId } = responseData;
+                console.log('Opening window with jobId:', jobId); // DEBUG
+
+                // const { jobId } = await response.json();
+
+                window.open(`https://www.resumegen.co?job=${jobId}`, '_blank');
+                unmountComponent();
+              } catch (error) {
+                console.error('Failed to store job:', error);
+              }
             }}
           />
         </React.StrictMode>
@@ -377,11 +403,10 @@ This is a full-time remote position with competitive benefits.`;
 
     const hasRealContent = !!(finalContent && finalContent.trim().length > 50);
 
-    console.log("Job Detector: Switching to final state with content:", jobDescriptionToMount.substring(0, 200) + '...');
-
-    // Switch states based on content found
+    console.log("Job Detector: Switching to final state with content:", jobDescriptionToMount.substring(0, 200) + '...');    // Switch states based on content found
     if (hasRealContent) {
       updateComponent(jobDescriptionToMount.trim(), true, false); // Start streaming
+      // REMOVE: The setTimeout - now handled by onStreamingComplete callback
     } else {
       updateComponent(jobDescriptionToMount.trim(), false, false); // Show instantly
     }

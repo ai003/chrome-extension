@@ -4,6 +4,7 @@ interface JobDetectorPanelProps {
   initialJobDescription?: string;
   onClose: () => void;
   onContinue: (jobDescription: string) => void;
+  onStreamingComplete?: () => void; // NEW: Callback when streaming finishes
   isScanning?: boolean;   // NEW: Phase 1 - Shows spinner without streaming
   isStreaming?: boolean;  // NEW: Phase 2 - Shows streaming animation
 }
@@ -12,6 +13,7 @@ const JobDetectorPanel: React.FC<JobDetectorPanelProps> = ({
   initialJobDescription = "",
   onClose,
   onContinue,
+  onStreamingComplete, // NEW
   isScanning = false,
   isStreaming = false
 }) => {
@@ -52,6 +54,8 @@ const JobDetectorPanel: React.FC<JobDetectorPanelProps> = ({
             setTimeout(() => {
               setJobDescription(initialJobDescription);
               setInternalLoading(false);
+              // NEW: Notify parent that streaming is complete
+              onStreamingComplete?.();
             }, 100);
           }
         }
@@ -63,7 +67,7 @@ const JobDetectorPanel: React.FC<JobDetectorPanelProps> = ({
       setJobDescription(initialJobDescription);
       setInternalLoading(false);
     }
-  }, [isStreaming, initialJobDescription]);
+  }, [isStreaming, initialJobDescription, onStreamingComplete]); // Add onStreamingComplete to deps
 
   return (
     <div className="panel-container">
@@ -116,8 +120,8 @@ const JobDetectorPanel: React.FC<JobDetectorPanelProps> = ({
       {/* Footer */}
       <div className="footer">
         <button
-          disabled={isScanning || isStreaming || !jobDescription.trim()}
-          className={`continue-button ${(isScanning || isStreaming || !jobDescription.trim()) ? 'disabled' : ''}`}
+          disabled={isScanning || isStreaming || jobDescription.trim().length < 50}
+          className={`continue-button ${(isScanning || isStreaming || jobDescription.trim().length < 50) ? 'disabled less than 50 words' : ''}`}
           onClick={() => onContinue(jobDescription)}
         >
           Continue to ResumeGen
