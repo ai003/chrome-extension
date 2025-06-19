@@ -34,7 +34,7 @@ const JobDetectorPanel: React.FC<JobDetectorPanelProps> = ({
 
       const interval = setInterval(() => {
         const elapsedTime = Date.now() - startTime;
-        const timeProgress = Math.min(elapsedTime / 4000, 1);
+        const timeProgress = Math.min(elapsedTime / 2500, 1);
 
         // Calculate character position based on time progress
         const characterPosition = Math.floor(timeProgress * initialJobDescription.length);
@@ -82,7 +82,7 @@ const JobDetectorPanel: React.FC<JobDetectorPanelProps> = ({
               <path d="M8 15h5"></path>
             </svg>
           </div>
-          <span className="header-title">Job Detector</span>
+          <span className="header-title">ResumeGen</span>
         </div>
         <button className="close-button" onClick={onClose}>
           ×
@@ -124,7 +124,7 @@ const JobDetectorPanel: React.FC<JobDetectorPanelProps> = ({
           className={`continue-button ${(isScanning || isStreaming || jobDescription.trim().length < 50) ? 'disabled less than 50 words' : ''}`}
           onClick={() => onContinue(jobDescription)}
         >
-          Continue to ResumeGen
+          Continue to Feedback
         </button>
       </div>
     </div>

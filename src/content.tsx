@@ -378,13 +378,12 @@ import JobDetectorPanel from './components/JobDetectorPanel';
     }
   }
 
-  function extractAndUpdate() {
-    const extractedContent = extractJobDescription(); // Single attempt
+  function extractAndUpdate(preFoundContent?: string) {
+    let finalContent = preFoundContent;
 
-    let finalContent = extractedContent;
-
+    // Skip extraction since we already have content
     if (!finalContent) {
-      console.log('Job Detector: First extraction failed, trying retry...');
+      console.log('Job Detector: No content passed, trying extraction...');
       finalContent = tryExtractWithRetry();
     }
 
@@ -626,7 +625,7 @@ This is a full-time remote position with competitive benefits.`;
 
 
   // Main detection logic
-  function initializeJobDetector() {
+  async function initializeJobDetector() {
 
     // Clear any existing timeout to prevent multiple detections
     if (detectionTimeout) {
@@ -654,16 +653,30 @@ This is a full-time remote position with competitive benefits.`;
     console.log("Job Detector: Mounting component with scanning state...");
     mountComponent("", false, true); // (content, isStreaming, isScanning)
 
-    const delay = 2000; // delay before extraction called to let page wait
-
-    detectionTimeout = setTimeout(() => {
-
-
-      // PHASE 2: Extract and switch to appropriate state
-      extractAndUpdate();
-    }, delay);
+    // PHASE 2: Wait for job content specifically
+    const foundContent = await waitForJobContent();
+    extractAndUpdate(foundContent); // Pass the found content
 
     //previously called detect and inject
+  }
+
+  // Wait for job content to be available
+  function waitForJobContent(): Promise<string> {
+    return new Promise((resolve) => {
+      const checkInterval = setInterval(() => {
+        const content = extractJobDescription();
+        if (content && content.length > 100) {
+          clearInterval(checkInterval);
+          resolve(content); // Return the found content
+        }
+      }, 250); // Check every 250ms
+
+      // Fallback timeout
+      setTimeout(() => {
+        clearInterval(checkInterval);
+        resolve(''); // Return empty string if timeout
+      }, 10000); // Max 10 seconds
+    });
   }
 
   // Run the detector when the content script loads
