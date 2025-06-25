@@ -120,8 +120,8 @@ const JobDetectorPanel: React.FC<JobDetectorPanelProps> = ({
       {/* Footer */}
       <div className="footer">
         <button
-          disabled={isScanning || isStreaming || jobDescription.trim().length < 50}
-          className={`continue-button ${(isScanning || isStreaming || jobDescription.trim().length < 50) ? 'disabled less than 50 words' : ''}`}
+          disabled={isScanning || isStreaming || jobDescription.trim().split(/\s+/).filter(word => word.length > 0).length < 50}
+          className={`continue-button ${(isScanning || isStreaming || jobDescription.trim().split(/\s+/).filter(word => word.length > 0).length < 50) ? 'disabled less than 50 words' : ''}`}
           onClick={() => onContinue(jobDescription)}
         >
           Continue to Feedback

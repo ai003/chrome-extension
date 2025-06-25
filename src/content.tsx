@@ -259,10 +259,7 @@ import JobDetectorPanel from './components/JobDetectorPanel';
           onClose={() => {
             unmountComponent();
           }}
-          onContinue={(jobDescription: string) => {
-            console.log('Job Detector: Initial mount with job description:', jobDescription);
-            unmountComponent();
-          }}
+          onContinue={handleContinueToFeedback}
         />
       </React.StrictMode>
     );
@@ -326,6 +323,38 @@ import JobDetectorPanel from './components/JobDetectorPanel';
   //     return true;
   //   }
 
+  // Shared API logic for continue functionality
+  async function handleContinueToFeedback(jobDescription: string) {
+    try {
+      const response = await fetch('https://us-central1-resumegen-d74ba.cloudfunctions.net/storeJob', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobDescription,
+          jobUrl: window.location.href
+        })
+      });
+
+      console.log('storeJob response status:', response.status);
+
+      const responseData = await response.json();
+      console.log('storeJob response data:', responseData);
+
+      if (!response.ok) {
+        console.error('storeJob failed:', responseData);
+        return;
+      }
+
+      const { jobId: serverJobId } = responseData;
+      console.log('Opening window with serverJobId:', serverJobId);
+
+      window.open(`https://www.resumegen.co?job=${serverJobId}`, '_blank');
+      unmountComponent();
+    } catch (error) {
+      console.error('Failed to store job:', error);
+    }
+  }
+
   function updateComponent(newDescription: string, isStreaming: boolean, isScanning: boolean) {
     if (root) {
       root.render(
@@ -339,39 +368,7 @@ import JobDetectorPanel from './components/JobDetectorPanel';
               // NEW: This gets called when streaming animation finishes
               updateComponent(newDescription, false, false); // Clear isStreaming
             }}
-            onContinue={async (jobDescription: string) => {
-              try {
-                const response = await fetch('https://us-central1-resumegen-d74ba.cloudfunctions.net/storeJob', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    jobDescription,
-                    jobUrl: window.location.href
-                  })
-                });
-
-                console.log('storeJob response status:', response.status); // DEBUG
-
-                const responseData = await response.json();
-                console.log('storeJob response data:', responseData); // DEBUG
-
-                if (!response.ok) {
-                  console.error('storeJob failed:', responseData);
-                  return; // Don't open window if storage failed
-                }
-
-
-                const { jobId } = responseData;
-                console.log('Opening window with jobId:', jobId); // DEBUG
-
-                // const { jobId } = await response.json();
-
-                window.open(`https://www.resumegen.co?job=${jobId}`, '_blank');
-                unmountComponent();
-              } catch (error) {
-                console.error('Failed to store job:', error);
-              }
-            }}
+            onContinue={handleContinueToFeedback}
           />
         </React.StrictMode>
       );
@@ -463,6 +460,15 @@ This is a full-time remote position with competitive benefits.`;
         }
       }
 
+      // Check for Ashby
+      if (url.includes('jobs.ashbyhq.com')) {
+        const ashbyElement = document.querySelector('._descriptionText_14ib5_206');
+        if (ashbyElement) {
+          console.log('Job Detector: Found Ashby job description');
+          return ashbyElement.textContent || '';
+        }
+      }
+
       // Check for Greenhouse
       if (url.includes('job-boards.greenhouse.io')) {
         const greenhouseElement = document.querySelector('.job__description.body');
@@ -500,6 +506,16 @@ This is a full-time remote position with competitive benefits.`;
   // New URL pattern detection logic
   function isJobPage() {
     const url = window.location.href;
+
+    if (url.includes('jobs.ashbyhq.com')) {
+      // Match: jobs.ashbyhq.com/CompanyName/UUID (overview page)
+      // Don't match: jobs.ashbyhq.com/CompanyName/UUID/application (for now)
+      const ashbyOverviewPattern = /jobs\.ashbyhq\.com\/[^\/]+\/[a-f0-9-]+$/i;
+      if (ashbyOverviewPattern.test(url)) {
+        console.log("Ashby overview page detected");
+        return true;
+      }
+    }
 
     // Enhanced exclusion patterns to catch completion/confirmation pages
     const excludePatterns = [
@@ -601,7 +617,7 @@ This is a full-time remote position with competitive benefits.`;
   */
 
   // Create unique job identifier from URL
-  function getJobId(): string | null {
+  function getUrlJobId(): string | null {
     const url = window.location.href;
 
     // Extract job identifier patterns
@@ -609,13 +625,16 @@ This is a full-time remote position with competitive benefits.`;
       /\/job\/.*?\/([^\/\?]+)/i,           // /job/.../R34288
       /\/jobs\/(\d+)/i,                    // /jobs/12345  
       /\/position\/(\d+)/i,                // /position/12345
-      /jobId=([^&]+)/i                     // ?jobId=6889008
+      /jobId=([^&]+)/i,                    // ?jobId=6889008
+      /\/([^\/]+)\/([0-9a-f-]{36})/i       // /Jerry/4dfd6c73-44aa-4e23-9ca1-0b6dc59a6d50 (Ashby format)
     ];
 
     for (let pattern of jobPatterns) {
       const match = url.match(pattern);
       if (match && match[1]) {
-        return `${window.location.hostname}-${match[1]}`;
+        // For Ashby format, use the job ID (second capture group)
+        const jobId = match[2] || match[1];
+        return `${window.location.hostname}-${jobId}`;
       }
     }
 
@@ -641,10 +660,10 @@ This is a full-time remote position with competitive benefits.`;
       return;
     }
 
-    const jobId = getJobId();
-    console.log("- Extracted Job ID:", jobId);
+    const urlJobId = getUrlJobId();
+    console.log("- Extracted URL Job ID:", urlJobId);
 
-    if (!jobId) {
+    if (!urlJobId) {
       console.log("Job Detector: Could not identify a unique job ID from the URL.");
       return;
     }
